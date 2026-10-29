@@ -11,7 +11,7 @@ final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate {
     @Published private(set) var automaticallyInstalls = false
     @Published private(set) var note = "更新服务尚未发布"
     private var controller: SPUStandardUpdaterController?
-    private var subscriptions: [AnyCancellable] = []
+    private var probeCompletion: (([String: Any]) -> Void)?
     private var installation: Task<Void, Never>?
 
     func start() {
@@ -27,9 +27,15 @@ final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate {
         controller.updater.publisher(for: \.canCheckForUpdates).assign(to: &$canCheck)
         controller.updater.publisher(for: \.automaticallyChecksForUpdates).assign(to: &$automaticallyChecks)
         controller.updater.publisher(for: \.automaticallyDownloadsUpdates).assign(to: &$automaticallyInstalls)
-        enabled = true
-        note = "从 GitHub 获取签名更新"
-        controller.startUpdater()
+        do {
+            try controller.updater.start()
+            enabled = true
+            note = "从 GitHub 获取签名更新"
+        } catch {
+            self.controller = nil
+            note = "无法启用更新：" + error.localizedDescription
+            log(note)
+        }
     }
 
     func check() {
@@ -39,6 +45,23 @@ final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate {
     }
     func setAutomaticChecks(_ value: Bool) { controller?.updater.automaticallyChecksForUpdates = value }
     func setAutomaticInstallation(_ value: Bool) { controller?.updater.automaticallyDownloadsUpdates = value }
+
+    /// Read-only release verification: uses Sparkle's feed validation without offering an install.
+    func probe(_ completion: @escaping ([String: Any]) -> Void) {
+        guard enabled, let controller else { completion(["enabled": false, "note": note]); return }
+        probeCompletion = completion
+        controller.updater.checkForUpdateInformation()
+    }
+
+    func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: Error?) {
+        guard let completion = probeCompletion else { return }
+        probeCompletion = nil
+        let code = (error as NSError?)?.code ?? 0
+        completion(["enabled": enabled, "canCheck": updater.canCheckForUpdates,
+                    "automaticallyChecks": updater.automaticallyChecksForUpdates,
+                    "automaticallyInstalls": updater.automaticallyDownloadsUpdates,
+                    "feedVerified": code == 0 || code == 1001, "errorCode": code, "note": note])
+    }
 
     func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
         note = "发现新版本 " + item.displayVersionString

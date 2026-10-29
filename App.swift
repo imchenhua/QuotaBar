@@ -7,6 +7,21 @@ import SwiftUI
 enum QuotaBarEntry {
     @MainActor static func main() {
         CredentialAgent.installBundledIfMissing()
+        if CommandLine.arguments.contains("--update-check-once") {
+            _ = NSApplication.shared
+            NSApp.setActivationPolicy(.prohibited)
+            let updater = AppUpdater.shared
+            updater.start()
+            updater.probe { report in
+                if let data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]) {
+                    print(String(decoding: data, as: UTF8.self))
+                }
+                exit(report["feedVerified"] as? Bool == true ? 0 : 1)
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 60) { exit(2) }
+            NSApp.run()
+            return
+        }
         if CommandLine.arguments.contains("--diagnostics-once") {
             Task { @MainActor in
                 let store = QuotaStore.shared

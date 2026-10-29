@@ -4,6 +4,9 @@ import Foundation
 
 @main struct UIRender {
     @MainActor static func main() throws {
+        precondition(Bundle.main.bundleIdentifier == "dev.rebon.quotabar.uitests", "UI rendering requires its isolated test app bundle")
+        UserDefaults.standard.removePersistentDomain(forName: "dev.rebon.quotabar.uitests")
+        UserDefaults.standard.set(CommandLine.arguments.contains("--english") ? "en" : "zh-Hans", forKey: "appLanguage")
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.prohibited)
         let output = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
@@ -38,6 +41,23 @@ import Foundation
         host.cacheDisplay(in: host.bounds, to: bitmap)
         guard let data = bitmap.representation(using: .png, properties: [:]) else { fatalError("No PNG") }
         try data.write(to: output.appendingPathComponent("panel.png"))
+        if CommandLine.arguments.contains("--switch-language") {
+            AppSettings.shared.language = .english
+            for _ in 0..<3 { RunLoop.current.run(until: Date().addingTimeInterval(0.1)) }
+            host.layoutSubtreeIfNeeded()
+            guard L("设置") == "Settings" else {
+                FileHandle.standardError.write(Data("Language switch failed: settings=\(AppSettings.shared.language.rawValue), stored=\(AppLanguage.current.rawValue), text=\(L("设置"))\n".utf8))
+                exit(1)
+            }
+            guard let switched = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { fatalError("No switched bitmap") }
+            host.cacheDisplay(in: host.bounds, to: switched)
+            let switchedData = switched.representation(using: .png, properties: [:])!
+            guard data != switchedData else {
+                FileHandle.standardError.write(Data("The open panel did not update after changing language\n".utf8))
+                exit(1)
+            }
+            try switchedData.write(to: output.appendingPathComponent("panel-language-switched.png"))
+        }
         // Recreate constrained hosts to model repeated popover presentation.
         for _ in 0..<3 {
             let reopened = NSHostingView(rootView: view)

@@ -4,6 +4,13 @@
 import AppKit
 import SwiftUI
 
+private struct LocalizedText: View {
+    @ObservedObject private var settings = AppSettings.shared
+    let source: String
+    init(_ source: String) { self.source = source }
+    var body: some View { Text(verbatim: TranslationCatalog.bundled.text(source, language: settings.language)) }
+}
+
 // MARK: - 面板
 
 final class PanelNavigation: ObservableObject {
@@ -42,14 +49,14 @@ struct ContentView: View {
                 VStack(spacing: 0) {
                     HStack {
                         Button { navigation.showingSettings = false } label: {
-                            Label("返回仪表", systemImage: "chevron.left")
+                            Label(L("返回仪表"), systemImage: "chevron.left")
                         }
                         .buttonStyle(.borderless)
                         .keyboardShortcut(.cancelAction)
                         Spacer()
-                        Text("设置").font(.headline)
+                        LocalizedText("设置").font(.headline)
                         Spacer()
-                        Button("完成") { navigation.showingSettings = false }
+                        Button(L("完成")) { navigation.showingSettings = false }
                             .keyboardShortcut(.defaultAction)
                     }
                     .padding(14)
@@ -62,6 +69,7 @@ struct ContentView: View {
         }
         .frame(width: 360, height: panelHeight)
         .background(Color(nsColor: .windowBackgroundColor))
+        .environment(\.locale, settings.language.locale)
         .onPreferenceChange(PanelSizePreference.self) { metrics in
             if let header = metrics["header"], let content = metrics["content"] {
                 let height = ceil(header + content + 1)
@@ -98,12 +106,12 @@ struct ContentView: View {
                     }
                     Divider()
                     HStack {
-                        Text("Claude").font(.headline)
+                        LocalizedText("Claude").font(.headline)
                         Spacer()
                     }
                     if store.accounts.isEmpty {
-                        Text("还没有账号").font(.headline)
-                        Text("到设置中添加 Claude 账号。")
+                        LocalizedText("还没有账号").font(.headline)
+                        LocalizedText("到设置中添加 Claude 账号。")
                             .font(.caption).foregroundStyle(.secondary)
                     } else {
                         ForEach(store.accounts) { account in
@@ -141,9 +149,9 @@ struct ContentView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 6) {
         HStack(spacing: 6) {
-            Text("QuotaBar").font(.headline)
+            LocalizedText("QuotaBar").font(.headline)
             if settings.paused {
-                Text("已暂停").font(.caption2)
+                LocalizedText("已暂停").font(.caption2)
                     .padding(.horizontal, 5).padding(.vertical, 1)
                     .background(Color.orange.opacity(0.18), in: Capsule())
                     .foregroundStyle(.orange)
@@ -160,8 +168,8 @@ struct ContentView: View {
                 }
             }
             .buttonStyle(.borderless)
-            .accessibilityLabel("刷新额度")
-            .help("立即重新获取额度；接口限流期间需等待")
+            .accessibilityLabel(L("刷新额度"))
+            .help(L("立即重新获取额度；接口限流期间需等待"))
             .disabled(store.refreshBusy || codexAccounts.refreshing || store.switching || store.verifying)
             Button {
                 navigation.showingSettings = true
@@ -169,8 +177,8 @@ struct ContentView: View {
                 Image(systemName: "gearshape")
             }
             .buttonStyle(.borderless)
-            .accessibilityLabel("打开设置")
-            .help("设置")
+            .accessibilityLabel(L("打开设置"))
+            .help(L("设置"))
         }
 
         }
@@ -182,6 +190,7 @@ struct ContentView: View {
 // MARK: - 账号行
 
 struct AccountRow: View {
+    @ObservedObject private var settings = AppSettings.shared
     let account: Account
     let snapshot: Snapshot?
     let isActive: Bool
@@ -199,16 +208,17 @@ struct AccountRow: View {
     }
 
     var body: some View {
+        let _ = settings.language
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 6) {
                 Text(account.name).font(.subheadline.weight(.semibold))
                 if isActive {
-                    Text("当前").font(.caption2)
+                    LocalizedText("当前").font(.caption2)
                         .padding(.horizontal, 5).padding(.vertical, 1)
                         .background(Color.green.opacity(0.18), in: Capsule())
                         .foregroundStyle(.green)
                 } else if !account.hasSession && !hasCredential {
-                    Text("未登录").font(.caption2)
+                    LocalizedText("未登录").font(.caption2)
                         .padding(.horizontal, 5).padding(.vertical, 1)
                         .background(Color.secondary.opacity(0.15), in: Capsule())
                         .foregroundStyle(.secondary)
@@ -218,12 +228,12 @@ struct AccountRow: View {
                     Text(plan).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
                 if !isActive && hasCredential {
-                    Button("切换") { onSwitch() }
+                    Button(L("切换")) { onSwitch() }
                         .buttonStyle(.bordered).controlSize(.small)
                 }
             }
             if let warning {
-                Text(warning).font(.caption2).foregroundStyle(.orange)
+                LocalizedText(warning).font(.caption2).foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if let snap = snapshot, snap.error == nil {
@@ -231,16 +241,16 @@ struct AccountRow: View {
                     VStack(alignment: .leading, spacing: 7) {
                         ForEach(snap.quotaWindows) { quota in
                             if let title = quota.title {
-                                Text(title).font(.caption.weight(.medium))
+                                LocalizedText(title).font(.caption.weight(.medium))
                             }
                             bar(quota.label, quota.window, now: context.date)
                         }
                     }
                 }
             } else if let snap = snapshot, let error = snap.error {
-                Text(error).font(.caption2).foregroundStyle(.orange)
+                LocalizedText(error).font(.caption2).foregroundStyle(.orange)
             } else {
-                Text("尚未取到数据").font(.caption2).foregroundStyle(.secondary)
+                LocalizedText("尚未取到数据").font(.caption2).foregroundStyle(.secondary)
             }
         }
     }
@@ -258,15 +268,15 @@ struct QuotaUsageBar: View {
         let pct = usedPercent ?? 0
         let tone: Color = pct >= 95 ? .red : (pct >= 80 ? .orange : .green)
         HStack(spacing: 6) {
-            Text(label).font(.caption).frame(width: 38, alignment: .leading)
+            LocalizedText(label).font(.caption).frame(width: 38, alignment: .leading)
             ProgressView(value: min(max(pct, 0), 100), total: 100)
                 .tint(tone).frame(minWidth: 24, maxWidth: .infinity)
-            Text(usedPercent.map { "\(Int($0))%" } ?? "-")
+            LocalizedText(usedPercent.map { "\(Int($0))%" } ?? "-")
                 .font(.caption.monospacedDigit()).frame(width: 34, alignment: .trailing)
-            Text(resetCountdown(resetsAt, now: now))
+            LocalizedText(resetCountdown(resetsAt, now: now))
                 .font(.caption2).foregroundStyle(.secondary)
                 .lineLimit(1).minimumScaleFactor(0.85).fixedSize(horizontal: true, vertical: false)
-                .help(resetsAt == nil ? "接口未提供重置时间" : "重置剩余时间：" + resetCountdown(resetsAt, now: now))
+                .help(L(resetsAt == nil ? "接口未提供重置时间" : "重置剩余时间：" + resetCountdown(resetsAt, now: now)))
         }
         .accessibilityElement(children: .combine)
     }
@@ -278,10 +288,10 @@ struct CodexQuotaSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack {
-                Text("GPT").font(.headline)
+                LocalizedText("GPT").font(.headline)
                 Spacer()
                 if let plan = store.snapshot?.plan {
-                    Text(["prolite": "Pro Lite", "plus": "Plus", "pro": "Pro", "free": "Free",
+                    LocalizedText(["prolite": "Pro Lite", "plus": "Plus", "pro": "Pro", "free": "Free",
                           "business": "Business", "team": "Team", "enterprise": "Enterprise", "edu": "Edu"][plan] ?? plan)
                         .font(.caption).foregroundStyle(.secondary)
                 }
@@ -298,21 +308,21 @@ struct CodexQuotaSection: View {
                                           resetsAt: window.resetsAt, now: context.date)
                         }
                         if context.date.timeIntervalSince(snapshot.fetchedAt) > 1800 {
-                            Text("历史数据，等待成功刷新").font(.caption2).foregroundStyle(.orange)
+                            LocalizedText("历史数据，等待成功刷新").font(.caption2).foregroundStyle(.orange)
                         }
                     }
                 }
             } else if store.error == nil {
-                Text(store.refreshing ? "正在获取额度…" : "等待获取 Codex 额度")
+                LocalizedText(store.refreshing ? "正在获取额度…" : "等待获取 GPT 额度")
                     .font(.caption).foregroundStyle(.secondary)
             }
             if let error = store.error {
-                Text(error + (store.snapshot == nil ? "" : "；保留上次数据"))
+                LocalizedText(error + (store.snapshot == nil ? "" : "；保留上次数据"))
                     .font(.caption2).foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if let message = store.message, message.contains("重试") {
-                Text(message).font(.caption2).foregroundStyle(.secondary)
+                LocalizedText(message).font(.caption2).foregroundStyle(.secondary)
             }
         }
     }
@@ -325,13 +335,13 @@ struct TokenSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
-                Text("Token 用量").font(.caption.weight(.semibold))
+                LocalizedText("Token 用量").font(.caption.weight(.semibold))
                 Spacer()
-                Picker("", selection: Binding(
+                Picker(L(""), selection: Binding(
                     get: { settings.chartStyle.rawValue },
                     set: { settings.chartStyle = ChartStyle(rawValue: $0) ?? .wave })) {
                     ForEach(ChartStyle.allCases) { style in
-                        Text(style.title).tag(style.rawValue)
+                        LocalizedText(style.title).tag(style.rawValue)
                     }
                 }
                 .labelsHidden().pickerStyle(.segmented).controlSize(.mini).fixedSize()
@@ -339,16 +349,16 @@ struct TokenSection: View {
 
             if settings.chartStyle == .wave {
                 HStack(spacing: 6) {
-                    Picker("", selection: Binding(
+                    Picker(L(""), selection: Binding(
                         get: { settings.chartGranularity.rawValue },
                         set: { settings.chartGranularity = ChartGranularity(rawValue: $0) ?? .day })) {
                         ForEach(ChartGranularity.allCases) { item in
-                            Text(item.title).tag(item.rawValue)
+                            LocalizedText(item.title).tag(item.rawValue)
                         }
                     }
                     .labelsHidden().pickerStyle(.segmented).controlSize(.mini).fixedSize()
                     Spacer()
-                    Text("今日 \(formatTokens(tokens.totals.today))")
+                    LocalizedText("今日 \(formatTokens(tokens.totals.today))")
                         .font(.caption2).foregroundStyle(.secondary)
                 }
                 WaveChart(points: tokens.series(for: settings.chartGranularity))
@@ -356,18 +366,18 @@ struct TokenSection: View {
             } else {
                 HeatmapChart(points: tokens.heat)
                     .frame(height: 96)
-                Text("最近 17 周 · 今日 \(formatTokens(tokens.totals.today)) · 本周 \(formatTokens(tokens.totals.week))")
+                LocalizedText("最近 17 周 · 今日 \(formatTokens(tokens.totals.today)) · 本周 \(formatTokens(tokens.totals.week))")
                     .font(.caption2).foregroundStyle(.secondary)
             }
 
             HStack(spacing: 6) {
-                Text("累计 \(formatTokens(tokens.totals.all))").help(tokens.source)
-                Text("· \(tokens.totals.requests) 次请求")
+                LocalizedText("累计 \(formatTokens(tokens.totals.all))").help(tokens.source)
+                LocalizedText("· \(tokens.totals.requests) 次请求")
                 Spacer()
                 if tokens.scanning {
-                    Text("统计中…")
+                    LocalizedText("统计中…")
                 } else if let stamp = tokens.lastScan {
-                    Text(stamp.formatted(date: .omitted, time: .shortened))
+                    LocalizedText(stamp.formatted(date: .omitted, time: .shortened))
                 }
             }
             .font(.caption2).foregroundStyle(.tertiary)
@@ -471,15 +481,15 @@ struct SettingsView: View {
                         CodexAccountSettingsRow(store: codex, accounts: codexAccounts)
                     }
                     HStack {
-                        Button("添加 GPT 账号") { codexAccounts.addAccount() }
+                        Button(L("添加 GPT 账号")) { codexAccounts.addAccount() }
                             .disabled(codexAccounts.signingIn)
                         if codexAccounts.signingIn {
                             ProgressView().controlSize(.small)
-                            Button("取消") { codexAccounts.cancelLogin() }
+                            Button(L("取消")) { codexAccounts.cancelLogin() }
                         }
                     }
                     if let note = codexAccounts.loginNote {
-                        Text(note).font(.caption2).foregroundStyle(.secondary)
+                        LocalizedText(note).font(.caption2).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -493,9 +503,9 @@ struct SettingsView: View {
                                     Text(plan).font(.caption).foregroundStyle(.secondary)
                                 }
                                 Menu {
-                                    Button("重新登录") { LoginController.shared.present(for: account) }
-                                    Button("保存当前凭据") { store.adoptLiveCredential(for: account) }
-                                    Button("移除", role: .destructive) { store.remove(account) }
+                                    Button(L("重新登录")) { LoginController.shared.present(for: account) }
+                                    Button(L("保存当前凭据")) { store.adoptLiveCredential(for: account) }
+                                    Button(L("移除"), role: .destructive) { store.remove(account) }
                                 } label: { Image(systemName: "ellipsis.circle") }
                                     .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
                             }
@@ -504,52 +514,57 @@ struct SettingsView: View {
                             }
                         }
                     }
-                    Button("添加 Claude 账号") { LoginController.shared.present() }
+                    Button(L("添加 Claude 账号")) { LoginController.shared.present() }
                 }
                 group("面板") {
-                    Toggle("显示 Token 图表", isOn: $settings.showTokenChart)
+                    Picker(L("Language / 语言"), selection: $settings.language) {
+                        ForEach(AppLanguage.allCases) { language in
+                            LocalizedText(language.title).tag(language)
+                        }
+                    }
+                    Toggle(L("显示 Token 图表"), isOn: $settings.showTokenChart)
                 }
 
                 group("刷新") {
-                    Toggle("暂停后台刷新", isOn: $settings.paused)
-                    Text("暂停后仅手动查询额度，当前账号识别仍会更新。")
+                    Toggle(L("暂停后台刷新"), isOn: $settings.paused)
+                    LocalizedText("暂停后仅手动查询额度，当前账号识别仍会更新。")
                         .font(.caption2).foregroundStyle(.secondary)
-                    Toggle("电池供电时降频", isOn: $settings.adaptiveRefresh)
+                    Toggle(L("电池供电时降频"), isOn: $settings.adaptiveRefresh)
                 }
 
                 group("通知") {
-                    Toggle("开启系统通知", isOn: $settings.notifyEnabled)
+                    Toggle(L("开启系统通知"), isOn: $settings.notifyEnabled)
                         .onChange(of: settings.notifyEnabled) { _, enabled in
                             if enabled { Notifier.shared.prepare(userInitiated: true) }
                         }
                     if settings.notifyEnabled {
                         slider("5 小时阈值", value: $settings.thresholdFive)
                         slider("7 天阈值", value: $settings.thresholdSeven)
-                        Toggle("切换账号后提醒", isOn: $settings.notifyOnSwitch)
-                        Text("没收到通知时，到「系统设置 → 通知」里允许 QuotaBar。未获授权时跳过通知，后台不会再次请求授权。")
+                        Toggle(L("切换账号后提醒"), isOn: $settings.notifyOnSwitch)
+                        LocalizedText("没收到通知时，到「系统设置 → 通知」里允许 QuotaBar。未获授权时跳过通知，后台不会再次请求授权。")
                             .font(.caption2).foregroundStyle(.secondary)
                     }
                 }
 
                 group("集成") {
-                    Toggle("切换后重开 IDE", isOn: $settings.autoRestartIDE)
-                    Text("会关闭并重新打开 VS Code / Cursor / Windsurf / JetBrains。有未保存文档时会跳过。")
+                    Toggle(L("切换后重开 IDE"), isOn: $settings.autoRestartIDE)
+                    LocalizedText("会关闭并重新打开 VS Code / Cursor / Windsurf / JetBrains。有未保存文档时会跳过。")
                         .font(.caption2).foregroundStyle(.secondary)
-                    Toggle("保持网页登录态", isOn: $settings.keepAliveEnabled)
+                    Toggle(L("保持网页登录态"), isOn: $settings.keepAliveEnabled)
                 }
 
                 group("软件更新") {
-                    Text("QuotaBar \(appVersion)").font(.caption).foregroundStyle(.secondary)
-                    Toggle("自动检查新版本", isOn: Binding(get: { updater.automaticallyChecks }, set: updater.setAutomaticChecks))
+                    LocalizedText("QuotaBar \(appVersion)").font(.caption).foregroundStyle(.secondary)
+                    Toggle(L("自动检查新版本"), isOn: Binding(get: { updater.automaticallyChecks }, set: updater.setAutomaticChecks))
                         .disabled(!updater.enabled)
-                    Toggle("自动下载并安装更新", isOn: Binding(get: { updater.automaticallyInstalls }, set: updater.setAutomaticInstallation))
+                    Toggle(L("自动下载并安装更新"), isOn: Binding(get: { updater.automaticallyInstalls }, set: updater.setAutomaticInstallation))
                         .disabled(!updater.enabled)
-                    Button("检查更新") { updater.check() }.disabled(!updater.canCheck)
-                    Text(updater.note).font(.caption2).foregroundStyle(.secondary)
+                    Button(L("检查更新")) { updater.check() }.disabled(!updater.canCheck)
+                    LocalizedText(updater.note).font(.caption2).foregroundStyle(.secondary)
                 }
                 group("诊断") {
                     HStack {
-                        Button(store.verifying ? "正在诊断…" : "运行诊断") { store.verifyAll() }
+                        Button(L(store.verifying ? "正在诊断…" : "运行诊断")) { store.verifyAll() }
                             .disabled(store.verifying || store.refreshBusy || store.switching || codexAccounts.refreshing || codexAccounts.signingIn)
                         if store.verifying { ProgressView().controlSize(.small) }
                     }
@@ -557,33 +572,33 @@ struct SettingsView: View {
                         VStack(alignment: .leading, spacing: 3) {
                             Label(result.name, systemImage: result.usageOK ? "checkmark.circle" : "exclamationmark.circle")
                                 .foregroundStyle(result.usageOK ? Color.green : Color.orange)
-                            Text(result.note).font(.caption2).foregroundStyle(.secondary)
+                            LocalizedText(result.note).font(.caption2).foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                     if let note = store.manualRefreshMessage {
-                        Text(note).font(.caption2).foregroundStyle(.secondary)
+                        LocalizedText(note).font(.caption2).foregroundStyle(.secondary)
                     }
                     if let note = store.switchNote {
-                        Text(note).font(.caption2).foregroundStyle(.secondary)
+                        LocalizedText(note).font(.caption2).foregroundStyle(.secondary)
                     }
                     HStack {
-                        Text("版本 \(appVersion)")
+                        LocalizedText("版本 \(appVersion)")
                             .font(.caption).foregroundStyle(.secondary)
                         Spacer()
-                        Button("导出诊断") {
+                        Button(L("导出诊断")) {
                             if let url = store.exportDiagnostics() {
                                 NSWorkspace.shared.activateFileViewerSelecting([url])
                             }
                         }
                         .buttonStyle(.bordered).controlSize(.small)
-                        Button("打开日志") {
+                        Button(L("打开日志")) {
                             NSWorkspace.shared.open(logDirectory)
                         }
                         .buttonStyle(.bordered).controlSize(.small)
                     }
                 }
-                Button("退出 QuotaBar") { NSApp.terminate(nil) }
+                Button(L("退出 QuotaBar")) { NSApp.terminate(nil) }
             }
             .padding(18)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -593,18 +608,18 @@ struct SettingsView: View {
     private func group<Content: View>(_ title: String,
                                       @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            LocalizedText(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
             content()
         }
     }
 
     private func slider(_ title: String, value: Binding<Int>) -> some View {
         HStack(spacing: 8) {
-            Text(title).font(.caption)
+            LocalizedText(title).font(.caption)
             Slider(value: Binding(
                 get: { Double(value.wrappedValue) },
                 set: { value.wrappedValue = Int($0) }), in: 50...100, step: 5)
-            Text("\(value.wrappedValue)%")
+            LocalizedText("\(value.wrappedValue)%")
                 .font(.caption.monospacedDigit())
                 .frame(width: 38, alignment: .trailing)
         }
@@ -612,21 +627,23 @@ struct SettingsView: View {
 }
 
 struct CodexAccountSettingsRow: View {
+    @ObservedObject private var settings = AppSettings.shared
     @ObservedObject var store: CodexQuotaStore
     @ObservedObject var accounts: CodexAccounts
 
     var body: some View {
+        let _ = settings.language
         HStack {
             VStack(alignment: .leading, spacing: 3) {
-                Text(store.snapshot?.email ?? (store.id == "current" ? "GPT 当前登录" : "新 GPT 账号"))
+                LocalizedText(store.snapshot?.email ?? (store.id == "current" ? "GPT 当前登录" : "新 GPT 账号"))
                     .font(.caption).textSelection(.enabled)
                 if store.id == "current" {
-                    Text("跟随 Codex 登录").font(.caption2).foregroundStyle(.secondary)
+                    LocalizedText("跟随 Codex 登录").font(.caption2).foregroundStyle(.secondary)
                 }
             }
             Spacer()
             if store.id != "current" {
-                Button("移除") { accounts.remove(store) }.controlSize(.small).disabled(store.refreshing)
+                Button(L("移除")) { accounts.remove(store) }.controlSize(.small).disabled(store.refreshing)
             }
         }
     }

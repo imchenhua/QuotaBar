@@ -38,24 +38,24 @@ final class LoginController: NSObject, NSWindowDelegate {
         generation = UUID()
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 560, height: 700))
 
-        let label = NSTextField(labelWithString: "登录后会自动存下这个账号的凭据，以后切换不用再登录")
+        let label = NSTextField(labelWithString: L("登录后会自动存下这个账号的凭据，以后切换不用再登录"))
         label.font = .systemFont(ofSize: 12)
         label.textColor = .secondaryLabelColor
         label.translatesAutoresizingMaskIntoConstraints = false
         statusLabel = label
         container.addSubview(label)
 
-        let cancel = NSButton(title: "取消", target: self, action: #selector(cancelTapped))
+        let cancel = NSButton(title: L("取消"), target: self, action: #selector(cancelTapped))
         cancel.bezelStyle = .rounded
         cancel.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(cancel)
 
-        let paste = NSButton(title: "手动粘贴", target: self, action: #selector(pasteTapped))
+        let paste = NSButton(title: L("手动粘贴"), target: self, action: #selector(pasteTapped))
         paste.bezelStyle = .rounded
         paste.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(paste)
 
-        let browser = NSButton(title: "用浏览器登录", target: self, action: #selector(browserTapped))
+        let browser = NSButton(title: L("用浏览器登录"), target: self, action: #selector(browserTapped))
         browser.bezelStyle = .rounded
         browser.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(browser)
@@ -89,7 +89,7 @@ final class LoginController: NSObject, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
-        window.title = "添加 Claude 账号"
+        window.title = L("添加 Claude 账号")
         window.contentView = container
         window.delegate = self
         window.center()
@@ -112,7 +112,7 @@ final class LoginController: NSObject, NSWindowDelegate {
     @objc private func browserTapped() {
         guard let url = OAuthPKCE.authorizeURL(verifier: verifier, state: oauthState) else { return }
         NSWorkspace.shared.open(url)
-        statusLabel?.stringValue = "请在浏览器完成授权，再点「手动粘贴」输入授权码"
+        statusLabel?.stringValue = L("请在浏览器完成授权，再点「手动粘贴」输入授权码")
     }
 
     @objc private func cancelTapped() {
@@ -152,13 +152,13 @@ final class LoginController: NSObject, NSWindowDelegate {
 
     @objc private func pasteTapped() {
         let alert = NSAlert()
-        alert.messageText = "粘贴授权码"
-        alert.informativeText = "把授权页上显示的 code#state 原样贴进来。"
+        alert.messageText = L("粘贴授权码")
+        alert.informativeText = L("把授权页上显示的 code#state 原样贴进来。")
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 380, height: 24))
         field.placeholderString = "code#state"
         alert.accessoryView = field
-        alert.addButton(withTitle: "确定")
-        alert.addButton(withTitle: "取消")
+        alert.addButton(withTitle: L("确定"))
+        alert.addButton(withTitle: L("取消"))
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         let text = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !busy else { return }
@@ -188,11 +188,11 @@ final class LoginController: NSObject, NSWindowDelegate {
             return
         }
         guard let raw = await scrapeCode() else {
-            statusLabel?.stringValue = "没自动读到授权码，点「手动粘贴」把页面上的 code 贴进来"
+            statusLabel?.stringValue = L("没自动读到授权码，点「手动粘贴」把页面上的 code 贴进来")
             return
         }
         busy = true
-        statusLabel?.stringValue = "已拿到授权码，正在换取凭据…"
+        statusLabel?.stringValue = L("已拿到授权码，正在换取凭据…")
         await finish(rawCode: raw)
     }
 
@@ -225,12 +225,12 @@ final class LoginController: NSObject, NSWindowDelegate {
         let attempt = generation
         let parts = rawCode.split(separator: "#", maxSplits: 1).map(String.init)
         guard parts.count == 2 else {
-            statusLabel?.stringValue = "授权码格式不对，应该是 code#state"
+            statusLabel?.stringValue = L("授权码格式不对，应该是 code#state")
             busy = false
             return
         }
         guard parts[1] == oauthState else {
-            statusLabel?.stringValue = "授权状态不匹配，请关闭窗口后重新登录"
+            statusLabel?.stringValue = L("授权状态不匹配，请关闭窗口后重新登录")
             busy = false
             return
         }
@@ -239,7 +239,7 @@ final class LoginController: NSObject, NSWindowDelegate {
         let exchanged = await exchange(code: parts[0], state: parts[1])
         guard generation == attempt, window != nil else { return }
         guard let payload = exchanged else {
-            statusLabel?.stringValue = "换取凭据失败，详情看 ~/Library/Logs/QuotaBar"
+            statusLabel?.stringValue = L("换取凭据失败，详情看 ~/Library/Logs/QuotaBar")
             busy = false
             return
         }
@@ -252,13 +252,13 @@ final class LoginController: NSObject, NSWindowDelegate {
         guard let profile = profileResult,
               let email = profile.account.email?.lowercased(), !email.isEmpty,
               let org = profile.organization?.uuid, !org.isEmpty else {
-            statusLabel?.stringValue = "无法核验 OAuth 账号身份，未保存。请重新登录"
+            statusLabel?.stringValue = L("无法核验 OAuth 账号身份，未保存。请重新登录")
             busy = false; return
         }
         guard generation == attempt, window != nil else { return }
         if let target = targetAccount,
            (target.email?.lowercased() != email || target.org.lowercased() != org.lowercased()) {
-            statusLabel?.stringValue = "登录的是其他账号，未覆盖目标账号。请关闭后重新登录"
+            statusLabel?.stringValue = L("登录的是其他账号，未覆盖目标账号。请关闭后重新登录")
             busy = false; return
         }
         var sessionKey = targetAccount?.sessionKey ?? ""
@@ -273,7 +273,7 @@ final class LoginController: NSObject, NSWindowDelegate {
         let account = Account(name: nickname, email: email, org: org, sessionKey: sessionKey)
         guard CredentialStore.store(payload: payload, email: email, for: account),
               Paths.upsert(account) else {
-            statusLabel?.stringValue = "凭据或账号保存失败，原资料保留，请检查日志后重试"
+            statusLabel?.stringValue = L("凭据或账号保存失败，原资料保留，请检查日志后重试")
             busy = false; return
         }
         log("登录成功 \(nickname) <\(email)>，凭据已存入槽")

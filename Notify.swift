@@ -33,7 +33,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         if let last = lastSent[key], Date().timeIntervalSince(last) < 600 { return }
         lastSent[key] = Date()
         let content = UNMutableNotificationContent()
-        content.title = title; content.body = body; content.sound = .default
+        content.title = L(title); content.body = L(body); content.sound = .default
         let request = UNNotificationRequest(identifier: "\(key)-\(Int(Date().timeIntervalSince1970))",
                                              content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request) { error in

@@ -39,6 +39,10 @@ final class AppSettings: ObservableObject {
 
     private let defaults = UserDefaults.standard
 
+    @Published var language: AppLanguage {
+        didSet { save(language.rawValue, "appLanguage") }
+    }
+
     @Published var menuBarStyle: MenuBarStyle {
         didSet { save(menuBarStyle.rawValue, "menuBarStyle") }
     }
@@ -83,6 +87,7 @@ final class AppSettings: ObservableObject {
 
     private init() {
         let d = UserDefaults.standard
+        language = .current
         menuBarStyle = MenuBarStyle(rawValue: d.string(forKey: "menuBarStyle") ?? "") ?? .standard
         showIcon = d.object(forKey: "showIcon") as? Bool ?? true
         paused = d.bool(forKey: "paused")
