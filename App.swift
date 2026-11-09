@@ -253,6 +253,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false)
+        window.isReleasedWhenClosed = false  // owned by `panelWindow`; avoid a double release on close
         window.title = "QuotaBar 面板"
         window.contentView = hosting
         window.center()

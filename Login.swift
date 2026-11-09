@@ -89,6 +89,9 @@ final class LoginController: NSObject, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
+        // Swift owns this window via `self.window`; AppKit must not also release it on close,
+        // otherwise the window is over-released and the app crashes a moment after closing.
+        window.isReleasedWhenClosed = false
         window.title = L("添加 Claude 账号")
         window.contentView = container
         window.delegate = self
@@ -133,6 +136,7 @@ final class LoginController: NSObject, NSWindowDelegate {
         generation = UUID()
         busy = false
         webView?.stopLoading()
+        (notification.object as? NSWindow)?.delegate = nil
         webView = nil
         statusLabel = nil
         targetAccount = nil
