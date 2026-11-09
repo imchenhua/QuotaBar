@@ -113,6 +113,7 @@ struct OAuthProfile: Decodable {
         let subscription_type: String?
         let rate_limit_tier: String?
         let organization_type: String?
+        let billing_type: String?
     }
     let account: Profile
     let organization: Org?

@@ -25,6 +25,13 @@ enum ChartGranularity: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var title: String {
         switch self {
+        case .hour: return "时"
+        case .day: return "日"
+        case .month: return "月"
+        }
+    }
+    var rangeDescription: String {
+        switch self {
         case .hour: return "24 小时"
         case .day: return "30 天"
         case .month: return "12 个月"

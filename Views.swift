@@ -126,7 +126,11 @@ struct ContentView: View {
                                 onSwitch: { store.switchTo(account) },
                                 onLogin: { LoginController.shared.present(for: account) },
                                 onAdopt: { store.adoptLiveCredential(for: account) },
-                                onRemove: { store.remove(account) }
+                                onRemove: { store.remove(account) },
+                                switching: store.switching && store.switchTargetID == account.id,
+                                switchingDisabled: store.switching || store.refreshBusy || store.verifying,
+                                switchMessage: store.switchTargetID == account.id ? store.switchNote : nil,
+                                switchNeedsLogin: store.switchTargetID == account.id && store.switchNeedsLogin
                             )
                             if account.id != store.accounts.last?.id { Divider() }
                         }
@@ -202,6 +206,10 @@ struct AccountRow: View {
     let onLogin: () -> Void
     let onAdopt: () -> Void
     let onRemove: () -> Void
+    var switching = false
+    var switchingDisabled = false
+    var switchMessage: String?
+    var switchNeedsLogin = false
 
     private func bar(_ label: String, _ window: UsageWindow?, now: Date) -> some View {
         QuotaUsageBar(label: label, usedPercent: window?.utilization, resetsAt: window?.resetsAt, now: now)
@@ -228,8 +236,21 @@ struct AccountRow: View {
                     Text(plan).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
                 if !isActive && hasCredential {
-                    Button(L("切换")) { onSwitch() }
+                    Button(L(switching ? "切换中…" : "切换")) { onSwitch() }
                         .buttonStyle(.bordered).controlSize(.small)
+                        .disabled(switchingDisabled)
+                        .help(L("切换 Claude Code 登录，不会直接切换 Rebon 或已有会话"))
+                }
+            }
+            if let message = switchMessage {
+                HStack(alignment: .top, spacing: 6) {
+                    if switching { ProgressView().controlSize(.mini) }
+                    LocalizedText(message).font(.caption2).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if switchNeedsLogin {
+                        Button(L("重新登录")) { onLogin() }.controlSize(.small)
+                            .disabled(switchingDisabled)
+                    }
                 }
             }
             if let warning {
@@ -353,7 +374,7 @@ struct TokenSection: View {
                         get: { settings.chartGranularity.rawValue },
                         set: { settings.chartGranularity = ChartGranularity(rawValue: $0) ?? .day })) {
                         ForEach(ChartGranularity.allCases) { item in
-                            LocalizedText(item.title).tag(item.rawValue)
+                            LocalizedText(item.title).tag(item.rawValue).help(L(item.rangeDescription))
                         }
                     }
                     .labelsHidden().pickerStyle(.segmented).controlSize(.mini).fixedSize()

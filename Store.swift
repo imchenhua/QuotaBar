@@ -30,6 +30,8 @@ final class QuotaStore: ObservableObject {
     @Published private(set) var activeIdentityCheckedAt: Date?
 
     @Published var switchNote: String?
+    @Published private(set) var switchTargetID: String?
+    @Published private(set) var switchNeedsLogin = false
     @Published var menuBarOrg: String = UserDefaults.standard.string(forKey: "menuBarOrg") ?? ""
 
     @Published private(set) var verifyResults: [VerifyResult] = []
@@ -124,7 +126,7 @@ final class QuotaStore: ObservableObject {
 
     var activeAccount: Account? {
         guard let key = activeKey, let checked = activeIdentityCheckedAt,
-              Date().timeIntervalSince(checked) < 90 else { return nil }
+              activeIdentityNote.isEmpty, Date().timeIntervalSince(checked) < 90 else { return nil }
         return accounts.first { CredentialStore.key(for: $0) == key }
     }
 
@@ -135,6 +137,9 @@ final class QuotaStore: ObservableObject {
     }
 
     func dataWarning(_ account: Account) -> String? {
+        if activeKey == CredentialStore.key(for: account), !activeIdentityNote.isEmpty {
+            return activeIdentityNote
+        }
         if !account.hasSession && !hasCredential(account) {
             return "需要重新登录；历史额度保留，尚未独立更新"
         }
@@ -143,6 +148,14 @@ final class QuotaStore: ObservableObject {
         if snap.source == "claudebar" { return "迁移的 ClaudeBar 历史数据，等待独立验证" }
         let age = Date().timeIntervalSince(snap.fetchedAt)
         if age < -60 || age > 1800 { return "数据已过期，等待成功更新" }
+        if let weekly = snap.sevenDay, (weekly.utilization ?? 0) >= 100,
+           weekly.resetsAt.map({ $0 > Date() }) ?? true {
+            return "该账号7d额度已满，切换后仍受周限额限制"
+        }
+        if let session = snap.fiveHour, (session.utilization ?? 0) >= 100,
+           session.resetsAt.map({ $0 > Date() }) ?? true {
+            return "该账号5h额度已满，切换后仍受时段限额限制"
+        }
         return nil
     }
 
@@ -245,44 +258,100 @@ final class QuotaStore: ObservableObject {
             activeKey = known.key
             activeIdentitySource = "凭据验证"
             activeIdentityCheckedAt = Date()
-            activeIdentityNote = ""
+            activeIdentityNote = accounts.first(where: { CredentialStore.key(for: $0) == known.key })
+                .map { ClaudeIdentityStore.matches($0) ? "" : "系统凭据与 Claude 身份不一致，请重新切换" } ?? ""
         } else {
+            activeKey = nil
+            activeFingerprint = nil
+            activeIdentityCheckedAt = nil
+            activeIdentityNote = "正在识别 Claude Code 账号…"
             Task { await identifyActive() }
         }
     }
 
     /// 只有用户点「切换」时才会走到这里，任何情况下都不自动切。
     func switchTo(_ account: Account) {
-        guard !switching, !refreshing, !verifying else {
+        guard !switching else { return }
+        switchTargetID = account.id
+        switchNeedsLogin = false
+        guard !refreshBusy, !verifying else {
             switchNote = "正在处理账号，请稍后再试"; return
         }
+        slots = CredentialStore.load()
         guard let original = slots[CredentialStore.key(for: account)],
               accessToken(of: original.payload) != nil else {
-            LoginController.shared.present(for: account); return
+            switchNeedsLogin = true
+            switchNote = "切换需要重新登录；额度读取正常不代表切换凭据有效"
+            return
         }
         switching = true
+        switchNote = "正在验证切换凭据…"
         identityRevision += 1
         Task { @MainActor in
             defer { switching = false }
-            var payload = original.payload
-            if expiresAt(of: payload).map({ $0 < Date().addingTimeInterval(300) }) ?? true {
+            guard !claudeRefreshInProgress() else {
+                switchNote = "Claude Code 正在续期，请稍后重试切换"; return
+            }
+            guard let outgoing = KeychainCredentials.readLive() else {
+                switchNote = "无法读取当前凭据，未切换"; return
+            }
+            do {
+                try SecretVault.write(outgoing, key: "switch:previous-live")
+                guard SecretVault.read(key: "switch:previous-live") == outgoing else {
+                    switchNote = "当前账号备份未通过，未切换"; return
+                }
+            } catch { switchNote = "当前账号备份失败，未切换"; return }
+            var outgoingOwnerKey = slots.first(where: { $0.value.fingerprint == credentialFingerprint(outgoing) })?.key
+            if let liveToken = accessToken(of: outgoing), let liveProfile = await fetchProfile(token: liveToken),
+               let owner = accounts.first(where: {
+                   $0.email?.lowercased() == liveProfile.account.email?.lowercased()
+                   && $0.org.lowercased() == liveProfile.organization?.uuid.lowercased()
+               }) {
+                outgoingOwnerKey = CredentialStore.key(for: owner)
+                guard CredentialStore.store(payload: outgoing, email: owner.email ?? owner.name, for: owner) else {
+                    switchNote = "当前账号最新凭据未保存，未切换"; return
+                }
+                slots = CredentialStore.load()
+            }
+            var payload = slots[CredentialStore.key(for: account)]?.payload ?? original.payload
+            let canRenew = canRefreshPrivateCredential(payload, accountKey: CredentialStore.key(for: account),
+                                                       livePayload: outgoing, liveAccountKey: outgoingOwnerKey)
+            if canRenew, expiresAt(of: payload).map({ $0 < Date().addingTimeInterval(300) }) ?? true {
+                guard let lease = OAuthRefreshLease.acquire(CredentialStore.key(for: account)) else {
+                    switchNote = "这个账号正在续期，请稍后重试"; return
+                }
+                defer { withExtendedLifetime(lease) {} }
+                payload = CredentialStore.load()[CredentialStore.key(for: account)]?.payload ?? payload
+                if expiresAt(of: payload).map({ $0 < Date().addingTimeInterval(300) }) ?? true {
                 guard let refreshed = await refreshCredential(payload) else {
-                    switchNote = "凭据续期失败，请重新登录 \(account.name)"; return
+                    switchNeedsLogin = true
+                    switchNote = "凭据续期未完成，请重试或重新登录 \(account.name)"
+                    log("手动切换未完成 → \(account.name)：凭据续期失败")
+                    return
                 }
                 payload = refreshed
+                // A successful refresh rotates tokens. Save them even if the subsequent profile
+                // request fails, so a transient network error cannot discard the new refresh token.
+                guard CredentialStore.store(payload: payload, email: original.email, for: account, refreshed: true) else {
+                    switchNote = "续期凭据未保存，未切换，请重试"
+                    return
+                }
+                slots = CredentialStore.load()
+                }
             }
             guard let token = accessToken(of: payload),
                   let profile = await fetchProfile(token: token),
                   let email = profile.account.email?.lowercased(),
                   email == account.email?.lowercased(),
                   profile.organization?.uuid.lowercased() == account.org.lowercased() else {
-                switchNote = "无法确认目标账号身份，未切换。请重新登录"; return
+                switchNeedsLogin = true
+                switchNote = "无法确认目标账号身份，未切换。请检查网络或重新登录"
+                log("手动切换未完成 → \(account.name)：身份验证未通过")
+                return
             }
+            switchNote = "正在切换 Claude Code 账号…"
             do {
-                try await Task.detached { try KeychainCredentials.switchLive(payload) }.value
-                guard CredentialStore.store(payload: payload, email: email, for: account) else {
-                    switchNote = "系统凭据已切换，但本地凭据保存失败，请检查登录状态"; return
-                }
+                try await Task.detached { try ClaudeAccountSwitch.commit(payload: payload, profile: profile, account: account) }.value
                 activeKey = CredentialStore.key(for: account)
                 activeFingerprint = credentialFingerprint(payload)
                 activeIdentitySource = "凭据验证"
@@ -297,6 +366,7 @@ final class QuotaStore: ObservableObject {
                 }
                 restartIDEsIfNeeded()
             } catch {
+                reloadCredentialState()
                 switchNote = "\(error)"
                 log("手动切换未完成；不会后台重试")
             }
@@ -304,6 +374,9 @@ final class QuotaStore: ObservableObject {
     }
 
     private func restartIDEsIfNeeded() {
+        if IDERestart.rebonIsRunning {
+            switchNote = "系统账号已切换。Rebon 已有 Claude 会话需停止后重试，才会读取新账号"
+        }
         guard AppSettings.shared.autoRestartIDE else {
             if !IDERestart.runningClients().isEmpty {
                 switchNote = "已切换。IDE 正在跑，重启后才会读到新凭据"
@@ -466,7 +539,8 @@ final class QuotaStore: ObservableObject {
                 activeFingerprint = fingerprint
                 activeIdentitySource = "凭据验证"
                 activeIdentityCheckedAt = Date()
-                activeIdentityNote = ""
+                activeIdentityNote = accounts.first(where: { CredentialStore.key(for: $0) == known.key })
+                    .map { ClaudeIdentityStore.matches($0) ? "" : "系统凭据与 Claude 身份不一致，请重新切换" } ?? ""
                 return
             }
             if let token = accessToken(of: live), let profile = await fetchProfile(token: token) {
@@ -481,7 +555,7 @@ final class QuotaStore: ObservableObject {
                     activeFingerprint = fingerprint
                     activeIdentitySource = "凭据验证"
                     activeIdentityCheckedAt = Date()
-                    activeIdentityNote = ""
+                    activeIdentityNote = ClaudeIdentityStore.matches(account) ? "" : "系统凭据与 Claude 身份不一致，请重新切换"
                     return
                 }
             }
@@ -491,22 +565,13 @@ final class QuotaStore: ObservableObject {
             activeIdentityCheckedAt = Date()
             return
         }
-        // Use the supported CLI identity command when its private Keychain entry is inaccessible.
-        let status = await Task.detached { ClaudeCLIIdentity.status() }.value
-        guard revision == identityRevision, !switching else { return }
+        // Never spawn Claude CLI from polling: it may request Keychain interaction in
+        // its own process even though our credential helper forbids background prompts.
+        activeKey = nil
         activeFingerprint = nil
         activeIdentityCheckedAt = Date()
-        activeIdentitySource = "Claude Code 状态"
-        if let status, let account = accountMatchingCLIStatus(status, accounts: accounts) {
-            activeKey = CredentialStore.key(for: account)
-            activeIdentityNote = ""
-        } else {
-            activeKey = nil
-            if let status, !status.loggedIn { activeIdentityNote = "Claude Code 尚未登录" }
-            else if let status, let method = status.authMethod, method != "claude.ai" {
-                activeIdentityNote = "Claude Code 使用 API 凭据"
-            } else { activeIdentityNote = "暂未识别到已保存的 Claude Code 账号" }
-        }
+        activeIdentitySource = ""
+        activeIdentityNote = "钥匙串暂不可访问，暂未识别当前账号"
     }
 
     func didAuthenticate(_ account: Account) {
@@ -555,6 +620,21 @@ final class QuotaStore: ObservableObject {
         if AppSettings.shared.paused && !manual { return 60 }
         reloadConfig()
         slots = CredentialStore.load()
+        let livePayload = KeychainCredentials.readLive()
+        var liveAccountKey = livePayload.flatMap(credentialFingerprint).flatMap { fingerprint in
+            slots.first(where: { $0.value.fingerprint == fingerprint })?.key
+        }
+        if liveAccountKey == nil, let livePayload, let token = accessToken(of: livePayload),
+           let profile = await fetchProfile(token: token),
+           let owner = accounts.first(where: {
+               $0.email?.lowercased() == profile.account.email?.lowercased()
+               && $0.org.lowercased() == profile.organization?.uuid.lowercased()
+           }) {
+            liveAccountKey = CredentialStore.key(for: owner)
+            if CredentialStore.store(payload: livePayload, email: owner.email ?? owner.name, for: owner) {
+                slots = CredentialStore.load()
+            }
+        }
         var cooldown: TimeInterval = 0
         var attempted = 0
         var succeeded = 0
@@ -573,22 +653,23 @@ final class QuotaStore: ObservableObject {
             lastAttempts[account.id] = now
             var slot = slots[CredentialStore.key(for: account)]
             if let existing = slot,
+               canRefreshPrivateCredential(existing.payload, accountKey: CredentialStore.key(for: account),
+                                           livePayload: livePayload, liveAccountKey: liveAccountKey),
                expiresAt(of: existing.payload).map({ $0 < now.addingTimeInterval(300) }) ?? true {
-                if let renewed = await refreshCredential(existing.payload) {
-                    // 只有身份保持一致才保存续期结果。
-                    if let token = accessToken(of: renewed),
-                       let profile = await fetchProfile(token: token),
-                       profile.account.email?.lowercased() == account.email?.lowercased(),
-                       profile.organization?.uuid.lowercased() == account.org.lowercased() {
-                        CredentialStore.store(payload: renewed, email: existing.email, for: account, refreshed: true)
-                        if let live = KeychainCredentials.readLive(),
-                           credentialFingerprint(live) == existing.fingerprint {
-                            do { try KeychainCredentials.writeLive(renewed) }
-                            catch { log("系统当前凭据续期同步失败") }
+                let lease = OAuthRefreshLease.acquire(CredentialStore.key(for: account))
+                if let lease {
+                    defer { withExtendedLifetime(lease) {} }
+                    // Reload under the lease so another process cannot leave us a rotated-out token.
+                    let latest = CredentialStore.load()[CredentialStore.key(for: account)] ?? existing
+                    slot = latest
+                    if expiresAt(of: latest.payload).map({ $0 < now.addingTimeInterval(300) }) ?? true,
+                       let renewed = await refreshCredential(latest.payload) {
+                        // Preserve rotated tokens immediately. Usage remains gated by profile verification below.
+                        if CredentialStore.store(payload: renewed, email: latest.email, for: account, refreshed: true) {
+                            slots = CredentialStore.load()
+                            slot = slots[CredentialStore.key(for: account)]
+                            log("\(account.name) 独立凭据已续期，等待用量身份核验")
                         }
-                        slots = CredentialStore.load()
-                        slot = slots[CredentialStore.key(for: account)]
-                        log("\(account.name) OAuth 已续期并核验身份")
                     }
                 }
             }

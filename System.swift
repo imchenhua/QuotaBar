@@ -7,6 +7,9 @@ import AppKit
 import Foundation
 
 enum IDERestart {
+    @MainActor static var rebonIsRunning: Bool {
+        NSWorkspace.shared.runningApplications.contains { $0.bundleIdentifier == "com.rebon.code" }
+    }
     private struct Target {
         let name: String
         let bundle: String

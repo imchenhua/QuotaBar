@@ -2,6 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 python3 scripts/build_agent.py
+python3 scripts/build_live_bridge.py
 swiftc -O -parse-as-library Localization.swift tests/LocalizationRegression.swift -o build/localization-tests
 build/localization-tests
 if [ -d build/QuotaBar.app ]; then
@@ -16,3 +17,4 @@ swiftc -O -parse-as-library Localization.swift Core.swift API.swift ClaudeBarDat
 build/codex-accounts-tests
 python3 -m unittest discover -s tests -p test_importer.py
 python3 tests/test_agent.py
+python3 tests/test_live_bridge.py

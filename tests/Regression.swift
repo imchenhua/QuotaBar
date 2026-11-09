@@ -6,6 +6,87 @@ struct Regression {
         guard condition() else { fatalError(message) }
     }
     static func main() throws {
+        var switchOperations: [String] = []
+        do {
+            try KeychainCredentials.switchLive("fixture") { operation, _ in
+                switchOperations.append(operation)
+                return AgentReply(ok: false, values: nil, value: nil, status: -25308, error: "interaction denied")
+            }
+            fatalError("Denied silent switch must fail")
+        } catch { }
+        check(switchOperations == ["write"], "Ordinary switching must never retry with an interactive Keychain request")
+        try KeychainCredentials.switchLive("fixture") { operation, _ in
+            switchOperations.append(operation)
+            return AgentReply(ok: true, values: nil, value: nil, status: nil, error: nil)
+        }
+        check(switchOperations == ["write", "write"], "Retries must continue to use the Apple bridge without an interactive fallback")
+        let identityDir = FileManager.default.temporaryDirectory.appendingPathComponent("quotabar-identity-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: identityDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: identityDir) }
+        let identityFile = identityDir.appendingPathComponent("claude.json")
+        let identityBackups = identityDir.appendingPathComponent("backups")
+        let originalConfig: [String: Any] = ["oauthAccount": ["emailAddress": "old@example.invalid", "organizationUuid": "old-org", "accountUuid": "old-uuid", "oldAccountFlag": true], "projects": ["/work": ["hasTrustDialogAccepted": true]], "mcpServers": ["example": ["command": "keep-me"]]]
+        let originalData = try JSONSerialization.data(withJSONObject: originalConfig)
+        try originalData.write(to: identityFile)
+        let identityProfile = try JSONDecoder().decode(OAuthProfile.self, from: Data(#"{"account":{"uuid":"new-uuid","email":"new@example.invalid","full_name":"New"},"organization":{"uuid":"new-org","billing_type":"apple_subscription"}}"#.utf8))
+        let identityAccount = Account(name: "New", email: "new@example.invalid", org: "new-org", sessionKey: "")
+        let oldPayload = #"{"claudeAiOauth":{"accessToken":"OLD-FAKE"}}"#
+        let newPayload = #"{"claudeAiOauth":{"accessToken":"NEW-FAKE"}}"#
+        var currentPayload = oldPayload
+        try ClaudeAccountSwitch.commit(payload: newPayload, profile: identityProfile, account: identityAccount,
+            identityURL: identityFile, backupDirectory: identityBackups, read: { currentPayload }, write: { currentPayload = $0 })
+        check(currentPayload == newPayload && ClaudeIdentityStore.matches(identityAccount, at: identityFile), "Switch must update both token and Claude identity")
+        let switchedConfig = try JSONSerialization.jsonObject(with: Data(contentsOf: identityFile)) as! [String: Any]
+        check((switchedConfig["projects"] as? NSDictionary) == (originalConfig["projects"] as? NSDictionary), "Preserve project trust settings")
+        check((switchedConfig["mcpServers"] as? NSDictionary) == (originalConfig["mcpServers"] as? NSDictionary), "Preserve MCP settings")
+        check((switchedConfig["oauthAccount"] as? [String: Any])?["oldAccountFlag"] == nil, "Never carry another account's feature flags")
+        let identityPermissions = try FileManager.default.attributesOfItem(atPath: identityFile.path)
+        check((identityPermissions[.posixPermissions] as? NSNumber)?.intValue == 0o600, "Identity file remains private")
+        let identityBackupFiles = try FileManager.default.contentsOfDirectory(atPath: identityBackups.path)
+        check(!identityBackupFiles.isEmpty, "Keep a durable identity backup")
+        // A failed identity commit must restore the original credential.
+        currentPayload = oldPayload
+        try Data("invalid-json".utf8).write(to: identityFile)
+        var writes = 0
+        do {
+            try ClaudeAccountSwitch.commit(payload: newPayload, profile: identityProfile, account: identityAccount,
+                identityURL: identityFile, backupDirectory: identityBackups, read: { currentPayload }, write: { currentPayload = $0; writes += 1 })
+            fatalError("Malformed identity configuration must refuse switching")
+        } catch { }
+        check(currentPayload == oldPayload && writes == 0, "Malformed config must fail before touching shared credentials")
+        try originalData.write(to: identityFile)
+        var reads = 0
+        do {
+            try ClaudeAccountSwitch.commit(payload: newPayload, profile: identityProfile, account: identityAccount,
+                identityURL: identityFile, backupDirectory: identityBackups,
+                read: { reads += 1; return reads == 2 ? oldPayload : currentPayload }, write: { currentPayload = $0 })
+            fatalError("Inconsistent post-switch state must not report success")
+        } catch { }
+        check(currentPayload == oldPayload, "Post-switch verification failure rolls back shared credential")
+        let restored = try ClaudeIdentityStore.read(at: identityFile)
+        check(restored?["accountUuid"] as? String == "old-uuid", "Post-switch verification failure restores original identity")
+        print("PASS: complete account switch, preserved settings, private backup, malformed input, and rollback of both stores")
+        let sharedPayload = #"{"claudeAiOauth":{"accessToken":"LIVE-FAKE","refreshToken":"SHARED-REFRESH"}}"#
+        let sharedOlderPayload = #"{"claudeAiOauth":{"accessToken":"OLD-ACCESS","refreshToken":"SHARED-REFRESH"}}"#
+        let privatePayload = #"{"claudeAiOauth":{"accessToken":"PRIVATE-FAKE","refreshToken":"PRIVATE-REFRESH"}}"#
+        check(!canRefreshPrivateCredential(sharedPayload, accountKey: "current", livePayload: sharedPayload, liveAccountKey: "current"), "CLI-owned login must never be independently refreshed")
+        check(!canRefreshPrivateCredential(sharedOlderPayload, accountKey: "other", livePayload: sharedPayload, liveAccountKey: "current"), "Shared refresh token must never be rotated by the monitor")
+        check(!canRefreshPrivateCredential(privatePayload, accountKey: "other", livePayload: sharedPayload, liveAccountKey: nil), "Unknown live owner must fail closed for background refresh")
+        check(!canRefreshPrivateCredential(privatePayload, accountKey: "other", livePayload: nil, liveAccountKey: nil), "Unreadable shared credentials must never be treated as an independent account")
+        check(canRefreshPrivateCredential(privatePayload, accountKey: "other", livePayload: sharedPayload, liveAccountKey: "current"), "Independent inactive account remains refreshable")
+        let leases = identityDir.appendingPathComponent("leases")
+        var lease = OAuthRefreshLease.acquire("account", directory: leases)
+        check(lease != nil && OAuthRefreshLease.acquire("account", directory: leases) == nil, "Concurrent refresh of the same account must be excluded")
+        lease = nil
+        let afterRelease = OAuthRefreshLease.acquire("account", directory: leases)
+        check(afterRelease != nil, "Refresh lease is released after scope exit")
+        withExtendedLifetime(afterRelease) {}
+        let cliLock = identityDir.appendingPathComponent(".oauth_refresh.lock")
+        try FileManager.default.createDirectory(at: cliLock, withIntermediateDirectories: false)
+        check(claudeRefreshInProgress(directory: identityDir), "Switch must notice Claude Code's in-flight refresh")
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-120)], ofItemAtPath: cliLock.path)
+        check(!claudeRefreshInProgress(directory: identityDir), "Stale CLI lock must not block switching forever")
+        print("PASS: shared-token refresh exclusion, unknown owner, per-account refresh serialization, CLI refresh lock")
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let later = now.addingTimeInterval(900)
         let earlier = now.addingTimeInterval(-60)

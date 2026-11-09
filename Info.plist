@@ -2,49 +2,52 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>CFBundleDisplayName</key>
-	<string>QuotaBar</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
-	<key>CFBundleLocalizations</key>
-	<array><string>en</string><string>zh-Hans</string></array>
+	<key>CFBundleDisplayName</key>
+	<string>QuotaBar</string>
 	<key>CFBundleExecutable</key>
 	<string>QuotaBar</string>
 	<key>CFBundleIconFile</key>
 	<string>QuotaBar-Mint</string>
 	<key>CFBundleIdentifier</key>
 	<string>dev.rebon.quotabar</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>en</string>
+		<string>zh-Hans</string>
+	</array>
 	<key>CFBundleName</key>
 	<string>QuotaBar</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>2.6.0</string>
+	<string>2.6.5</string>
 	<key>CFBundleVersion</key>
-	<string>36</string>
+	<string>41</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>27.0</string>
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>QuotaBarUpdatesEnabled</key>
+	<true/>
+	<key>SUAutomaticallyUpdate</key>
+	<true/>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUEnableSystemProfiling</key>
+	<false/>
 	<key>SUFeedURL</key>
 	<string>https://github.com/imchenhua/QuotaBar/releases/latest/download/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>CbnD+uAVARSVhP5fQAFKfLF1WApMOg3bzwtjf+XD2yU=</string>
-	<key>QuotaBarUpdatesEnabled</key>
-	<true/>
-	<key>SUEnableAutomaticChecks</key>
-	<true/>
-	<key>SUAutomaticallyUpdate</key>
+	<key>SURequireSignedFeed</key>
 	<true/>
 	<key>SUScheduledCheckInterval</key>
 	<integer>21600</integer>
-	<key>SUEnableSystemProfiling</key>
-	<false/>
 	<key>SUVerifyUpdateBeforeExtraction</key>
-	<true/>
-	<key>SURequireSignedFeed</key>
 	<true/>
 </dict>
 </plist>

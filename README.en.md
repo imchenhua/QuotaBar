@@ -25,6 +25,6 @@ Requires **Apple Silicon and macOS 27 or later**. The app is locally signed and 
 
 GPT quota reading requires Codex CLI. Detecting the current Claude Code account requires Claude Code CLI. Quota checks do not start model conversations. New GPT sign-ins use isolated CLI directories and preserve your existing Codex sign-in.
 
-The installer puts the app in `~/Applications/QuotaBar.app` and backs up an existing version. Accounts stay on your machine; account stores, credentials, and local logs are excluded from source and release packages. The fixed credential helper preserves its identity during updates to avoid repeated permission requests.
+The installer puts the app in `~/Applications/QuotaBar.app` and backs up an existing version. Accounts stay on your machine; account stores, credentials, and local logs are excluded from source and release packages. The fixed helper manages QuotaBar's private vault only. Claude Code's shared credential is updated in place through Apple's `security` tool, with tokens passed through stdin rather than process arguments. The bridge checks the unlocked state and access metadata first and refuses unavailable access without an authorization fallback.
 
 See the [development instructions](README.md#开发从源码构建) for building and publishing. Sparkle's license is included in [support/Sparkle-LICENSE](support/Sparkle-LICENSE).

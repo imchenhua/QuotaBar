@@ -1,4 +1,26 @@
-# QuotaBar 2.6.0
+# QuotaBar 2.6.5
+
+- Token 图表的粒度切换改为简洁的「时／日／月」，悬停显示对应范围（24 小时／30 天／12 个月）。
+
+## QuotaBar 2.6.4
+
+- 切换同时更新共享凭据和 `~/.claude.json` 中的账号身份，并复核两份状态；失败时恢复原凭据和身份，保留其他项目与 MCP 配置。
+- 切走前保存当前账号最新令牌；后台不续期 Claude Code 当前共享登录，独立账号续期按账号加锁，并保留已轮换的新令牌。
+- 识别 Claude Code 的续期锁，避免在其续期过程中覆盖登录状态。
+- 身份不一致不再标成“当前”；对已用满 5h／7d 的账号显示限制提示，切换后明确提示 Rebon 旧会话需要重连。
+- 验证新增：配置保留与私有备份、两份状态回滚、共享令牌续期排除、未知归属时不续期、跨进程续期互斥与陈旧锁恢复。
+
+## QuotaBar 2.6.2
+
+- 修复 Claude 凭据续期／切换后签名分区被重置、持续弹钥匙串密码窗口的问题。共享凭据改由 Apple 工具原地更新，原固定助手只管理私有资料。
+- 旧凭据迁移先创建并验证加密恢复副本，再迁移共享条目；账号和令牌保持不变。
+- 权限不可用时直接显示失败，不自动请求授权；切换进度与错误直接显示在对应账号旁。
+- 修复续期后临时网络失败可能丢失轮换刷新令牌的问题；版本显示改为读取实际应用版本。
+- 验证覆盖旧权限迁移、连续 12 次写入与读取、无授权时拒绝访问、无效写入保护和转义令牌。
+
+Shared Claude credentials now use Apple-owned, in-place updates instead of native helper writes that reset partition access. Migration keeps verified encrypted recovery copies; unavailable access fails without an authorization fallback. Regression tests cover migration and twelve repeated credential updates and reads.
+
+## QuotaBar 2.6.0
 
 - 提供 DMG 安装包：打开后点击安装，自动放好应用并启动，已有应用先备份。
 - 新增 Language 设置：跟随系统、简体中文和 English，切换立即生效。

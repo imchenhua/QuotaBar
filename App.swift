@@ -7,6 +7,21 @@ import SwiftUI
 enum QuotaBarEntry {
     @MainActor static func main() {
         CredentialAgent.installBundledIfMissing()
+        if CommandLine.arguments.contains("--switch-readiness") {
+            let slots = CredentialStore.load()
+            let report = Paths.loadAccounts().map { account -> [String: Any] in
+                let payload = slots[CredentialStore.key(for: account)]?.payload
+                return ["name": account.name,
+                        "hasOAuth": payload.flatMap(accessToken) != nil,
+                        "expired": payload.flatMap { expiresAt(of: $0) }.map { $0 < Date() } ?? true,
+                        "hasRefreshToken": payload.flatMap(oauthDictionary)?["refreshToken"] is String,
+                        "hasWebSession": account.hasSession]
+            }
+            if let data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]) {
+                print(String(decoding: data, as: UTF8.self))
+            }
+            return
+        }
         if CommandLine.arguments.contains("--update-check-once") {
             _ = NSApplication.shared
             NSApp.setActivationPolicy(.prohibited)
@@ -100,11 +115,31 @@ enum QuotaBarEntry {
             }
             dispatchMain()
         }
+        if CommandLine.arguments.contains("--sync-live-identity") {
+            Task { @MainActor in
+                guard let live = KeychainCredentials.readLive(), let token = accessToken(of: live),
+                      let profile = await fetchProfile(token: token),
+                      let account = Paths.loadAccounts().first(where: {
+                          $0.email?.lowercased() == profile.account.email?.lowercased()
+                          && $0.org.lowercased() == profile.organization?.uuid.lowercased()
+                      }) else { print("Identity verification failed; unchanged"); exit(1) }
+                do {
+                    try ClaudeIdentityStore.synchronize(profile)
+                    guard ClaudeIdentityStore.matches(account) else { print("Identity verification failed"); exit(1) }
+                    print("Claude identity synchronized to \(account.name); shared token unchanged")
+                    exit(0)
+                } catch { print("Claude identity synchronization failed; backup retained"); exit(1) }
+            }
+            dispatchMain()
+        }
         if CommandLine.arguments.contains("--active-account-check") {
             Task { @MainActor in
                 let store = QuotaStore.shared
                 await store.identifyActive()
+                let keychainAccount = store.accounts.first { CredentialStore.key(for: $0) == store.activeKey }
                 let report = ["name": store.activeAccount?.name ?? "未识别",
+                              "keychainName": keychainAccount?.name ?? "未识别",
+                              "identitySynchronized": String(keychainAccount.map { ClaudeIdentityStore.matches($0) } ?? false),
                               "source": store.activeIdentitySource,
                               "note": store.activeIdentityNote,
                               "menuBarText": store.menuBarText]
@@ -115,9 +150,27 @@ enum QuotaBarEntry {
             }
             dispatchMain()
         }
+        if CommandLine.arguments.contains("--repair-live-credential") {
+            guard let old = CredentialAgent.call("live-read"), old.ok, let payload = old.value else {
+                print("Repair unavailable; live credential unchanged"); exit(1)
+            }
+            let backupKey = "repair:live:" + UUID().uuidString
+            do { try SecretVault.write(payload, key: backupKey) }
+            catch { print("Backup failed; live credential unchanged"); exit(1) }
+            guard SecretVault.read(key: backupKey) == payload else {
+                print("Backup verification failed; live credential unchanged"); exit(1)
+            }
+            guard LiveCredentialBridge.call("migrate", value: payload)?.ok == true,
+                  let live = KeychainCredentials.readLive(),
+                  credentialFingerprint(live) == credentialFingerprint(payload) else {
+                print("Repair incomplete; encrypted recovery copies retained"); exit(1)
+            }
+            print("Repair verified: same account and token, Apple-owned item, encrypted backup retained")
+            return
+        }
         if CommandLine.arguments.contains("--credential-check") {
             let reply = CredentialAgent.call("load")
-            let live = CredentialAgent.call("live-read")
+            let live = LiveCredentialBridge.call("read")
             let report: [String: Any] = ["agentVerified": CredentialAgent.verified,
                 "vaultAccessible": reply?.ok == true,
                 "storedSecretCount": reply?.values?.count ?? 0,
