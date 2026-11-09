@@ -125,6 +125,8 @@ enum CodexQuotaProbe {
         process.standardOutput = output
         // Do not forward protocol diagnostics or credential-related subprocess errors into app logs.
         process.standardError = FileHandle.nullDevice
+        let exited = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in exited.signal() }
         do { try process.run() } catch { throw CodexQuotaError.cliMissing }
         let watchdog = DispatchWorkItem {
             if process.isRunning { kill(process.processIdentifier, SIGKILL) }
@@ -134,9 +136,9 @@ enum CodexQuotaProbe {
             try? input.fileHandleForWriting.close()
             if process.isRunning { process.terminate() }
             // A CLI that ignores stdin closure or SIGTERM must not leave an orphan server.
-            let end = Date().addingTimeInterval(1)
-            while process.isRunning && Date() < end { Thread.sleep(forTimeInterval: 0.01) }
-            if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+            if exited.wait(timeout: .now() + 1) == .timedOut, process.isRunning {
+                kill(process.processIdentifier, SIGKILL)
+            }
             process.waitUntilExit()
             watchdog.cancel()
             try? output.fileHandleForReading.close()

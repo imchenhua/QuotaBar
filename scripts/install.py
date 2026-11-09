@@ -29,7 +29,10 @@ if stage.exists(): raise SystemExit('Staging directory already exists; inspect i
 shutil.copytree(source,stage,symlinks=True)
 subprocess.run(['codesign','--verify','--deep','--strict',str(stage)],check=True)
 target=home/'Applications/QuotaBar.app'
-backup=root/'releases'/datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
+# Keep only the previous version as a rollback; '.noindex' keeps it out of Spotlight/Launchpad.
+backup_root=root/'releases.noindex'
+if backup_root.exists(): shutil.rmtree(backup_root)
+backup=backup_root/datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
 backup.mkdir(parents=True)
 if target.exists(): target.rename(backup/'QuotaBar.app')
 stage.rename(target)
