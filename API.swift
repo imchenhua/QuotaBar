@@ -128,17 +128,37 @@ struct OAuthProfile: Decodable {
     }
 }
 
-func fetchProfile(token: String) async -> OAuthProfile? {
-    guard let url = URL(string: "https://api.anthropic.com/api/oauth/profile") else { return nil }
+enum ProfileCheck {
+    case ok(OAuthProfile)
+    /// No HTTP response: proxy/node down, DNS, TLS or timeout. Not a login problem.
+    case network(String)
+    /// HTTP error from Anthropic, e.g. 401/403 (needs re-login) or 429 (rate limited).
+    case http(Int)
+    case invalid
+}
+
+func checkProfile(token: String) async -> ProfileCheck {
+    guard let url = URL(string: "https://api.anthropic.com/api/oauth/profile") else { return .invalid }
     var request = URLRequest(url: url)
     request.timeoutInterval = 12
     request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
     request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
-    guard let (data, response) = try? await oauthSession().data(for: request),
-          (response as? HTTPURLResponse)?.statusCode == 200
-    else { return nil }
-    return try? JSONDecoder().decode(OAuthProfile.self, from: data)
+    let data: Data, response: URLResponse
+    do { (data, response) = try await oauthSession().data(for: request) }
+    catch {
+        let code = (error as? URLError)?.code.rawValue ?? -1
+        return .network("URLError \(code)")
+    }
+    guard let status = (response as? HTTPURLResponse)?.statusCode else { return .network("no HTTP response") }
+    guard status == 200 else { return .http(status) }
+    guard let profile = try? JSONDecoder().decode(OAuthProfile.self, from: data) else { return .invalid }
+    return .ok(profile)
+}
+
+func fetchProfile(token: String) async -> OAuthProfile? {
+    if case .ok(let profile) = await checkProfile(token: token) { return profile }
+    return nil
 }
 
 func fetchOAuthUsage(token: String) async -> Snapshot {

@@ -191,5 +191,6 @@
   "该账号5h额度已满，切换后仍受时段限额限制": "This account has reached its 5h limit. Switching to it will not restore session quota.",
   "时": "Hour",
   "日": "Day",
-  "月": "Month"
+  "月": "Month",
+  "OAuth 凭据属于其他账号，请重新登录": "OAuth credentials belong to another account; sign in again"
 }

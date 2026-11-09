@@ -677,13 +677,23 @@ final class QuotaStore: ObservableObject {
             var result: Snapshot
             var verifiedPlan: String?
             if let slot, let token = accessToken(of: slot.payload) {
-                if let profile = await fetchProfile(token: token),
-                   profile.account.email?.lowercased() == account.email?.lowercased(),
-                   profile.organization?.uuid.lowercased() == account.org.lowercased() {
+                switch await checkProfile(token: token) {
+                case .ok(let profile)
+                    where profile.account.email?.lowercased() == account.email?.lowercased()
+                       && profile.organization?.uuid.lowercased() == account.org.lowercased():
                     result = await fetchOAuthUsage(token: token)
                     verifiedPlan = profile.planLabel(payload: slot.payload)
-                } else {
-                    result = Snapshot(fetchedAt: Date(), error: "无法核验 OAuth 身份，请重新登录")
+                case .ok:
+                    result = Snapshot(fetchedAt: Date(), error: "OAuth 凭据属于其他账号，请重新登录")
+                case .network(let detail):
+                    // Network failures say nothing about the login; retry soon instead of backing off for 30 min.
+                    result = Snapshot(fetchedAt: Date(), error: "网络连接失败（代理或节点不可用：\(detail)），稍后自动重试")
+                case .http(let status) where status == 401 || status == 403:
+                    result = Snapshot(fetchedAt: Date(), error: "OAuth 凭据已失效（HTTP \(status)），请重新登录")
+                case .http(let status):
+                    result = Snapshot(fetchedAt: Date(), error: "身份核验暂时失败（HTTP \(status)），稍后自动重试")
+                case .invalid:
+                    result = Snapshot(fetchedAt: Date(), error: "身份核验返回无法解析，稍后自动重试")
                 }
                 if let error = result.error, !error.contains("429"), account.hasSession {
                     let fallback = await fetchUsage(account)
@@ -707,7 +717,10 @@ final class QuotaStore: ObservableObject {
             if let error = result.error {
                 let n = min((consecutiveFailures[account.id] ?? 0) + 1, 10)
                 consecutiveFailures[account.id] = n
-                let backoff = max(result.retryAfter ?? 0, min(pow(2, Double(n)) * 60, 1800))
+                // A dead proxy/node is not the account's fault: retry every minute so quotas come back
+                // as soon as the network does, instead of waiting out a 30-minute backoff.
+                let networkDown = error.hasPrefix("网络连接失败")
+                let backoff = networkDown ? 60 : max(result.retryAfter ?? 0, min(pow(2, Double(n)) * 60, 1800))
                 nextEligible[account.id] = Date().addingTimeInterval(backoff)
                 if error.contains("429") { cooldown = max(cooldown, backoff) }
                 log("\(account.name) 独立取数失败：\(error)，保留历史数据，退避 \(Int(backoff))s")
